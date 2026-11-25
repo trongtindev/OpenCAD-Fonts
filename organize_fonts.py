@@ -218,6 +218,83 @@ def organize_directory(dir_path: Path, execute: bool = False) -> None:
 
     print(f"Hoàn thành! Đã di chuyển: {moved_count} file. Lỗi: {error_count} file.")
 
+    # Tự động cập nhật catalog.json sau khi di chuyển
+    generate_catalog(dir_path)
+
+
+def format_size(size_bytes: int) -> str:
+    """Định dạng dung lượng file thành chuỗi dễ đọc (B, KB, MB)."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+
+def generate_catalog(dir_path: Path) -> Path:
+    """Tạo file catalog.json lưu danh mục font tại thư mục gốc dir_path."""
+    import json
+    from datetime import datetime, timezone
+
+    font_extensions = {'.ttf', '.otf', '.shx', '.fon', '.ttc', '.pfb', '.pfm'}
+    catalog_file = dir_path / "catalog.json"
+
+    # Lấy danh sách các thư mục con (mỗi thư mục con đại diện cho 1 họ/tên font)
+    subdirs = sorted([d for d in dir_path.iterdir() if d.is_dir()], key=lambda d: d.name.lower())
+
+    families = []
+    total_files = 0
+    total_size_bytes = 0
+
+    for d in subdirs:
+        # Lấy danh sách các file font trong thư mục con này
+        files_in_dir = sorted(
+            [f for f in d.iterdir() if f.is_file() and f.suffix.lower() in font_extensions],
+            key=lambda f: f.name.lower()
+        )
+        if not files_in_dir:
+            continue
+
+        file_items = []
+        for f in files_in_dir:
+            size = f.stat().st_size
+            total_files += 1
+            total_size_bytes += size
+            # Dùng forward slash / để chuẩn hóa đa nền tảng
+            rel_path = f"{d.name}/{f.name}"
+            file_items.append({
+                "name": f.name,
+                "path": rel_path,
+                "extension": f.suffix.lower(),
+                "size_bytes": size,
+                "size_formatted": format_size(size)
+            })
+
+        families.append({
+            "name": d.name,
+            "count": len(file_items),
+            "files": file_items
+        })
+
+    catalog_data = {
+        "folder": dir_path.name,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_families": len(families),
+        "total_files": total_files,
+        "total_size_bytes": total_size_bytes,
+        "total_size_formatted": format_size(total_size_bytes),
+        "families": families
+    }
+
+    with open(catalog_file, "w", encoding="utf-8") as out:
+        json.dump(catalog_data, out, ensure_ascii=False, indent=2)
+
+    print(f"Đã tạo file catalog: {catalog_file}")
+    print(f"  - Tổng số font families: {len(families)}")
+    print(f"  - Tổng số file font: {total_files} ({format_size(total_size_bytes)})")
+    return catalog_file
+
 
 def undo_directory(dir_path: Path) -> None:
     """Hoàn tác: chuyển toàn bộ file từ các thư mục con cấp 1 về lại thư mục gốc dir_path."""
@@ -262,6 +339,11 @@ def main():
         action='store_true',
         help="Hoàn tác: chuyển toàn bộ file từ các thư mục con về lại thư mục gốc."
     )
+    parser.add_argument(
+        '--catalog',
+        action='store_true',
+        help="Chỉ tạo/cập nhật file catalog.json cho các thư mục mục tiêu mà không di chuyển file."
+    )
 
     args = parser.parse_args()
 
@@ -273,6 +355,8 @@ def main():
             target_path = root_dir / target_path
         if args.undo:
             undo_directory(target_path)
+        elif args.catalog:
+            generate_catalog(target_path)
         else:
             organize_directory(target_path, execute=args.execute)
 
